@@ -3,6 +3,20 @@
   "nodes": [
     {
       "parameters": {
+        "mode": "raw",
+        "jsonOutput": "{\n  \"PHANTOMBUSTER_OUTREACH_AGENT_ID\": \"YOUR_OUTREACH_AGENT_ID_HERE\",\n  \"APP_WEBHOOK_URL\": \"https://your-app.vercel.app\"\n}",
+        "options": {}
+      },
+      "id": "config",
+      "name": "⚙️ Configuration",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [240, 140],
+      "notesInFlow": true,
+      "notes": "👆 EDIT THIS NODE: Set your PhantomBuster Outreach Agent ID and App URL here"
+    },
+    {
+      "parameters": {
         "rule": {
           "interval": [
             {
@@ -21,7 +35,7 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "=https://api.phantombuster.com/api/v2/agents/fetch-output?id={{ $env.PHANTOMBUSTER_OUTREACH_AGENT_ID }}",
+        "url": "=https://api.phantombuster.com/api/v2/agents/fetch-output?id={{ $('⚙️ Configuration').item.json.PHANTOMBUSTER_OUTREACH_AGENT_ID }}",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth"
       },
@@ -39,7 +53,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Filter for leads that have replied\nconst output = $input.first().json;\nlet replied = [];\n\ntry {\n  const data = typeof output.output === 'string' ? JSON.parse(output.output) : (output.resultObject || []);\n  \n  if (Array.isArray(data)) {\n    replied = data\n      .filter(item => item.replied === true || item.replied === 'true' || item.status === 'replied')\n      .map(item => ({\n        profile_url: item.profileUrl || item.linkedInProfileUrl,\n        name: item.profileName || item.fullName,\n        replied_at: item.repliedAt || new Date().toISOString()\n      }));\n  }\n} catch (e) {\n  console.log('Parse error:', e.message);\n}\n\nreturn replied.map(r => ({ json: r }));"
+        "jsCode": "// Filter for leads that have replied\nconst output = $input.first().json;\nconst config = $('⚙️ Configuration').item.json;\nlet replied = [];\n\ntry {\n  const data = typeof output.output === 'string' ? JSON.parse(output.output) : (output.resultObject || []);\n  \n  if (Array.isArray(data)) {\n    replied = data\n      .filter(item => item.replied === true || item.replied === 'true' || item.status === 'replied')\n      .map(item => ({\n        profile_url: item.profileUrl || item.linkedInProfileUrl,\n        name: item.profileName || item.fullName,\n        replied_at: item.repliedAt || new Date().toISOString(),\n        APP_WEBHOOK_URL: config.APP_WEBHOOK_URL\n      }));\n  }\n} catch (e) {\n  console.log('Parse error:', e.message);\n}\n\nreturn replied.map(r => ({ json: r }));"
       },
       "id": "filter-replied",
       "name": "Filter Replied Leads",
@@ -80,7 +94,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.APP_WEBHOOK_URL }}/api/webhooks/lead-replied",
+        "url": "={{ $json.APP_WEBHOOK_URL }}/api/webhooks/lead-replied",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ profile_url: $json.profile_url, name: $json.name, replied_at: $json.replied_at }) }}"
@@ -94,6 +108,9 @@
   ],
   "connections": {
     "Check Every 2 Hours": {
+      "main": [[{ "node": "⚙️ Configuration", "type": "main", "index": 0 }]]
+    },
+    "⚙️ Configuration": {
       "main": [[{ "node": "Fetch Outreach Results", "type": "main", "index": 0 }]]
     },
     "Fetch Outreach Results": {
