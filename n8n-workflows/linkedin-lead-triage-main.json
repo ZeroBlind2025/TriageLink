@@ -1,0 +1,492 @@
+{
+  "name": "LinkedIn Lead Triage - Main Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 4
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Run Every 4 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.phantombuster.com/api/v2/agents/launch",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ id: $env.PHANTOMBUSTER_AGENT_ID }) }}"
+      },
+      "id": "phantombuster-launch",
+      "name": "Launch PhantomBuster Agent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [460, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "phantombuster-creds",
+          "name": "PhantomBuster API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 60,
+        "unit": "seconds"
+      },
+      "id": "wait-for-scrape",
+      "name": "Wait for Scrape",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.phantombuster.com/api/v2/agents/fetch-output?id={{ $env.PHANTOMBUSTER_AGENT_ID }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "id": "fetch-results",
+      "name": "Fetch Scrape Results",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [900, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "phantombuster-creds",
+          "name": "PhantomBuster API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse PhantomBuster output from LinkedIn Post Commenter and Liker Scraper\nconst output = $input.first().json;\nlet posts = [];\n\ntry {\n  // PhantomBuster returns results as JSON array\n  const data = typeof output.output === 'string' ? JSON.parse(output.output) : (output.resultObject || output.output || []);\n  \n  if (Array.isArray(data)) {\n    posts = data.map(item => ({\n      // Post Commenter and Liker Scraper output fields\n      linkedin_post_id: item.postUrl?.split('activity:')[1]?.split('?')[0] || item.postUrl || crypto.randomUUID(),\n      post_url: item.postUrl || '',\n      post_content: item.postContent || '',\n      author_name: item.profileName || item.fullName || item.firstName + ' ' + item.lastName || 'Unknown',\n      author_profile_url: item.profileUrl || item.linkedInProfileUrl || '',\n      author_headline: item.headline || item.occupation || '',\n      author_company: item.companyName || item.company || '',\n      engagement_type: item.type || (item.comment ? 'comment' : 'like'), // 'like' or 'comment'\n      comment_text: item.comment || item.commentContent || null,\n      likes_count: parseInt(item.likeCount || 0),\n      comments_count: parseInt(item.commentCount || 0),\n      posted_at: item.postDate || item.timestamp || new Date().toISOString(),\n      scraped_at: new Date().toISOString(),\n      matched_keywords: [],\n      engagement_score: calculateEngagementScore(item)\n    }));\n  }\n} catch (e) {\n  console.log('Parse error:', e.message);\n}\n\nfunction calculateEngagementScore(item) {\n  // Commenters are higher intent than likers\n  const baseScore = item.comment ? 10 : 3;\n  const likes = parseInt(item.likeCount || 0);\n  const comments = parseInt(item.commentCount || 0);\n  return baseScore + (likes * 1) + (comments * 3);\n}\n\nreturn posts.map(p => ({ json: p }));"
+      },
+      "id": "parse-posts",
+      "name": "Parse & Structure Posts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO posts (\n  linkedin_post_id,\n  post_url,\n  post_content,\n  author_name,\n  author_profile_url,\n  author_headline,\n  author_company,\n  likes_count,\n  comments_count,\n  posted_at,\n  scraped_at,\n  matched_keywords,\n  engagement_score\n) VALUES (\n  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13\n)\nON CONFLICT (linkedin_post_id) DO UPDATE SET\n  likes_count = EXCLUDED.likes_count,\n  comments_count = EXCLUDED.comments_count,\n  engagement_score = EXCLUDED.engagement_score,\n  updated_at = NOW()\nRETURNING id;",
+        "options": {
+          "queryParams": "={{ [$json.linkedin_post_id, $json.post_url, $json.post_content, $json.author_name, $json.author_profile_url, $json.author_headline, $json.author_company, $json.likes_count, $json.comments_count, $json.posted_at, $json.scraped_at, JSON.stringify($json.matched_keywords), $json.engagement_score] }}"
+        }
+      },
+      "id": "upsert-posts",
+      "name": "Upsert Posts to DB",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.3,
+      "position": [1340, 300],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-creds",
+          "name": "PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Create leads from post authors if they match ICP criteria\nINSERT INTO leads (name, profile_url, headline, company, source_post_id, status)\nSELECT DISTINCT ON (p.author_profile_url)\n  p.author_name,\n  p.author_profile_url,\n  p.author_headline,\n  p.author_company,\n  p.id,\n  'new'\nFROM posts p\nLEFT JOIN leads l ON l.profile_url = p.author_profile_url\nWHERE l.id IS NULL\n  AND p.scraped_at > NOW() - INTERVAL '1 hour'\n  AND p.engagement_score > 10\nRETURNING id, name;"
+      },
+      "id": "create-leads",
+      "name": "Create New Leads",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.3,
+      "position": [1560, 300],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-creds",
+          "name": "PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.APP_WEBHOOK_URL }}/api/webhooks/new-leads",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ leads: $json, timestamp: new Date().toISOString() }) }}"
+      },
+      "id": "notify-app",
+      "name": "Notify App of New Leads",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1780, 300]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-replied",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "reply-webhook",
+      "name": "Lead Replied Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 520],
+      "webhookId": "lead-replied"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE leads SET \n  status = 'replied',\n  replied_at = NOW(),\n  updated_at = NOW()\nWHERE id = $1 OR profile_url = $2\nRETURNING id, name, status;",
+        "options": {
+          "queryParams": "={{ [$json.body.lead_id || 0, $json.body.profile_url || ''] }}"
+        }
+      },
+      "id": "mark-replied",
+      "name": "Mark Lead as Replied",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.3,
+      "position": [460, 520],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-creds",
+          "name": "PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Cancel all pending follow-ups for this lead\nUPDATE outreach_sequence SET\n  status = 'cancelled',\n  cancelled_reason = 'lead_replied',\n  updated_at = NOW()\nWHERE lead_id = $1 AND status = 'pending'\nRETURNING id;",
+        "options": {
+          "queryParams": "={{ [$json.id] }}"
+        }
+      },
+      "id": "cancel-followups",
+      "name": "Cancel Pending Follow-ups",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.3,
+      "position": [680, 520],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-creds",
+          "name": "PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, lead_id: $json.id, cancelled_followups: $input.all().length }) }}"
+      },
+      "id": "webhook-response",
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [900, 520]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "followup-schedule",
+      "name": "Check Follow-ups Hourly",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 740]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  os.id as sequence_id,\n  os.lead_id,\n  os.step_number,\n  os.scheduled_for,\n  os.message_template,\n  l.name as lead_name,\n  l.profile_url,\n  l.company,\n  l.status as lead_status\nFROM outreach_sequence os\nJOIN leads l ON l.id = os.lead_id\nWHERE os.status = 'pending'\n  AND os.scheduled_for <= NOW()\n  AND l.status NOT IN ('replied', 'opted_out', 'converted')\nORDER BY os.scheduled_for ASC\nLIMIT 20;"
+      },
+      "id": "get-due-followups",
+      "name": "Get Due Follow-ups",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.3,
+      "position": [460, 740],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-creds",
+          "name": "PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-has-followups",
+              "leftValue": "={{ $json.sequence_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "has-followups",
+      "name": "Has Follow-ups?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 740]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Personalize message template\nconst item = $input.first().json;\n\nconst personalized = item.message_template\n  .replace(/\\{\\{name\\}\\}/g, item.lead_name || 'there')\n  .replace(/\\{\\{first_name\\}\\}/g, (item.lead_name || 'there').split(' ')[0])\n  .replace(/\\{\\{company\\}\\}/g, item.company || 'your company');\n\nreturn {\n  json: {\n    ...item,\n    personalized_message: personalized\n  }\n};"
+      },
+      "id": "personalize-message",
+      "name": "Personalize Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 680]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.APP_WEBHOOK_URL }}/api/webhooks/send-outreach",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "trigger-outreach",
+      "name": "Trigger Outreach Send",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1120, 680]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE outreach_sequence SET\n  status = 'sent',\n  sent_at = NOW(),\n  updated_at = NOW()\nWHERE id = $1;",
+        "options": {
+          "queryParams": "={{ [$json.sequence_id] }}"
+        }
+      },
+      "id": "mark-sent",
+      "name": "Mark as Sent",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.3,
+      "position": [1340, 680],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-creds",
+          "name": "PostgreSQL"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Run Every 4 Hours": {
+      "main": [
+        [
+          {
+            "node": "Launch PhantomBuster Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Launch PhantomBuster Agent": {
+      "main": [
+        [
+          {
+            "node": "Wait for Scrape",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Scrape": {
+      "main": [
+        [
+          {
+            "node": "Fetch Scrape Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Scrape Results": {
+      "main": [
+        [
+          {
+            "node": "Parse & Structure Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse & Structure Posts": {
+      "main": [
+        [
+          {
+            "node": "Upsert Posts to DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Posts to DB": {
+      "main": [
+        [
+          {
+            "node": "Create New Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create New Leads": {
+      "main": [
+        [
+          {
+            "node": "Notify App of New Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lead Replied Webhook": {
+      "main": [
+        [
+          {
+            "node": "Mark Lead as Replied",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Lead as Replied": {
+      "main": [
+        [
+          {
+            "node": "Cancel Pending Follow-ups",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cancel Pending Follow-ups": {
+      "main": [
+        [
+          {
+            "node": "Respond Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Follow-ups Hourly": {
+      "main": [
+        [
+          {
+            "node": "Get Due Follow-ups",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Due Follow-ups": {
+      "main": [
+        [
+          {
+            "node": "Has Follow-ups?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Follow-ups?": {
+      "main": [
+        [
+          {
+            "node": "Personalize Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Personalize Message": {
+      "main": [
+        [
+          {
+            "node": "Trigger Outreach Send",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger Outreach Send": {
+      "main": [
+        [
+          {
+            "node": "Mark as Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2024-01-15T00:00:00.000Z",
+  "versionId": "1"
+}
