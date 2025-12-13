@@ -1,0 +1,223 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  name         String?
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  settings          UserSettings?
+  icpProfiles       IcpProfile[]
+  posts             Post[]
+  leads             Lead[]
+  messageTemplates  MessageTemplate[]
+  outreachSequences OutreachSequence[]
+  activityLogs      ActivityLog[]
+  analyticsSnapshots AnalyticsSnapshot[]
+
+  @@map("users")
+}
+
+model UserSettings {
+  id                          String   @id @default(uuid())
+  userId                      String   @unique @map("user_id")
+  phantombusterApiKeyEncrypted String? @map("phantombuster_api_key_encrypted")
+  phantombusterAgentId        String?  @map("phantombuster_agent_id")
+  n8nWebhookUrl               String?  @map("n8n_webhook_url")
+  linkedinSessionCookieEncrypted String? @map("linkedin_session_cookie_encrypted")
+  settingsJson                Json     @default("{}") @map("settings_json")
+  createdAt                   DateTime @default(now()) @map("created_at")
+  updatedAt                   DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_settings")
+}
+
+model IcpProfile {
+  id                 String   @id @default(uuid())
+  userId             String   @map("user_id")
+  name               String
+  description        String?
+  keywords           String[] @default([])
+  jobTitles          String[] @default([]) @map("job_titles")
+  industries         String[] @default([])
+  companySizes       String[] @default([]) @map("company_sizes")
+  locations          String[] @default([])
+  excludeKeywords    String[] @default([]) @map("exclude_keywords")
+  minEngagementScore Int      @default(0) @map("min_engagement_score")
+  isActive           Boolean  @default(true) @map("is_active")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  user              User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  posts             Post[]
+  analyticsSnapshots AnalyticsSnapshot[]
+
+  @@map("icp_profiles")
+}
+
+model Post {
+  id               String    @id @default(uuid())
+  userId           String    @map("user_id")
+  linkedinPostId   String    @map("linkedin_post_id")
+  postUrl          String?   @map("post_url")
+  postContent      String?   @map("post_content")
+  authorName       String?   @map("author_name")
+  authorProfileUrl String?   @map("author_profile_url")
+  authorHeadline   String?   @map("author_headline")
+  authorCompany    String?   @map("author_company")
+  authorAvatarUrl  String?   @map("author_avatar_url")
+  likesCount       Int       @default(0) @map("likes_count")
+  commentsCount    Int       @default(0) @map("comments_count")
+  repostsCount     Int       @default(0) @map("reposts_count")
+  postedAt         DateTime? @map("posted_at")
+  scrapedAt        DateTime  @default(now()) @map("scraped_at")
+  matchedKeywords  Json      @default("[]") @map("matched_keywords")
+  matchedIcpId     String?   @map("matched_icp_id")
+  engagementScore  Int       @default(0) @map("engagement_score")
+  isReviewed       Boolean   @default(false) @map("is_reviewed")
+  isRelevant       Boolean?  @map("is_relevant")
+  notes            String?
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  matchedIcp   IcpProfile?  @relation(fields: [matchedIcpId], references: [id])
+  leads        Lead[]
+  activityLogs ActivityLog[]
+
+  @@unique([userId, linkedinPostId])
+  @@index([userId, scrapedAt(sort: Desc)])
+  @@index([userId, engagementScore(sort: Desc)])
+  @@index([linkedinPostId])
+  @@map("posts")
+}
+
+model Lead {
+  id               String    @id @default(uuid())
+  userId           String    @map("user_id")
+  name             String?
+  firstName        String?   @map("first_name")
+  lastName         String?   @map("last_name")
+  profileUrl       String    @map("profile_url")
+  headline         String?
+  company          String?
+  location         String?
+  avatarUrl        String?   @map("avatar_url")
+  sourcePostId     String?   @map("source_post_id")
+  sourceType       String    @default("post_author") @map("source_type")
+  status           String    @default("new")
+  icpMatchScore    Int       @default(0) @map("icp_match_score")
+  tags             String[]  @default([])
+  notes            String?
+  firstContactedAt DateTime? @map("first_contacted_at")
+  lastContactedAt  DateTime? @map("last_contacted_at")
+  repliedAt        DateTime? @map("replied_at")
+  convertedAt      DateTime? @map("converted_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourcePost        Post?              @relation(fields: [sourcePostId], references: [id])
+  outreachSequences OutreachSequence[]
+  activityLogs      ActivityLog[]
+
+  @@unique([userId, profileUrl])
+  @@index([userId, status])
+  @@index([profileUrl])
+  @@map("leads")
+}
+
+model MessageTemplate {
+  id           String   @id @default(uuid())
+  userId       String   @map("user_id")
+  name         String
+  templateType String   @default("connection_request") @map("template_type")
+  subject      String?
+  body         String
+  stepNumber   Int      @default(1) @map("step_number")
+  delayDays    Int      @default(0) @map("delay_days")
+  isActive     Boolean  @default(true) @map("is_active")
+  usageCount   Int      @default(0) @map("usage_count")
+  replyRate    Decimal  @default(0) @map("reply_rate") @db.Decimal(5, 2)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  outreachSequences OutreachSequence[]
+
+  @@map("message_templates")
+}
+
+model OutreachSequence {
+  id              String    @id @default(uuid())
+  userId          String    @map("user_id")
+  leadId          String    @map("lead_id")
+  templateId      String?   @map("template_id")
+  stepNumber      Int       @map("step_number")
+  messageContent  String?   @map("message_content")
+  scheduledFor    DateTime? @map("scheduled_for")
+  status          String    @default("pending")
+  sentAt          DateTime? @map("sent_at")
+  cancelledReason String?   @map("cancelled_reason")
+  errorMessage    String?   @map("error_message")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lead     Lead             @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  template MessageTemplate? @relation(fields: [templateId], references: [id])
+
+  @@index([userId, status, scheduledFor])
+  @@map("outreach_sequences")
+}
+
+model ActivityLog {
+  id           String   @id @default(uuid())
+  userId       String   @map("user_id")
+  leadId       String?  @map("lead_id")
+  postId       String?  @map("post_id")
+  activityType String   @map("activity_type")
+  description  String?
+  metadata     Json     @default("{}")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lead Lead? @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  post Post? @relation(fields: [postId], references: [id], onDelete: SetNull)
+
+  @@index([userId, activityType, createdAt(sort: Desc)])
+  @@map("activity_log")
+}
+
+model AnalyticsSnapshot {
+  id              String    @id @default(uuid())
+  userId          String    @map("user_id")
+  snapshotDate    DateTime  @map("snapshot_date") @db.Date
+  postsScraped    Int       @default(0) @map("posts_scraped")
+  leadsCreated    Int       @default(0) @map("leads_created")
+  leadsContacted  Int       @default(0) @map("leads_contacted")
+  repliesReceived Int       @default(0) @map("replies_received")
+  conversions     Int       @default(0)
+  replyRate       Decimal   @default(0) @map("reply_rate") @db.Decimal(5, 2)
+  conversionRate  Decimal   @default(0) @map("conversion_rate") @db.Decimal(5, 2)
+  topPerformingIcpId String? @map("top_performing_icp")
+  metadata        Json      @default("{}")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  topPerformingIcp IcpProfile? @relation(fields: [topPerformingIcpId], references: [id])
+
+  @@unique([userId, snapshotDate])
+  @@map("analytics_snapshots")
+}
