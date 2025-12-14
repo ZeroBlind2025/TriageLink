@@ -137,7 +137,7 @@ export default function AnalyticsPage() {
                       cx="50%"
                       cy="50%"
                       outerRadius={80}
-                      label={(entry) => entry.icpName}
+                      label={({ name }) => name}
                     >
                       {leadsByIcp.map((_: unknown, index: number) => (
                         <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
