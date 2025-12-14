@@ -53,7 +53,7 @@ export function MiniChart({ data }: MiniChartProps) {
                     return (
                       <div className="rounded-lg border bg-background p-2 shadow-sm">
                         <div className="text-xs text-muted-foreground">
-                          {new Date(label).toLocaleDateString()}
+                          {label ? new Date(label).toLocaleDateString() : ''}
                         </div>
                         {payload.map((entry) => (
                           <div key={entry.name} className="flex items-center gap-2">
