@@ -74,7 +74,7 @@ export function LeadDrawer({
             <DialogHeader>
               <div className="flex items-start gap-4">
                 <Avatar className="h-16 w-16">
-                  {lead.avatarUrl && <AvatarImage src={lead.avatarUrl as string} />}
+                  {lead.avatarUrl ? <AvatarImage src={lead.avatarUrl as string} /> : null}
                   <AvatarFallback className="text-lg">{initials}</AvatarFallback>
                 </Avatar>
                 <div className="flex-1">
