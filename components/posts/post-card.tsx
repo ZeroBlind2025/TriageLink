@@ -32,33 +32,33 @@ export function PostCard({ post, onMarkRelevant, onCreateLead }: PostCardProps) 
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3">
             <Avatar>
-              {post.authorAvatarUrl && (
+              {post.authorAvatarUrl ? (
                 <AvatarImage src={post.authorAvatarUrl as string} alt={post.authorName as string} />
-              )}
+              ) : null}
               <AvatarFallback>{initials}</AvatarFallback>
             </Avatar>
             <div>
               <p className="font-semibold">{post.authorName as string}</p>
               <p className="text-sm text-muted-foreground">{post.authorHeadline as string}</p>
-              {post.authorCompany && (
+              {post.authorCompany ? (
                 <p className="text-xs text-muted-foreground">{post.authorCompany as string}</p>
-              )}
+              ) : null}
             </div>
           </div>
           <div className="flex items-center gap-2">
             <Badge variant="secondary">Score: {post.engagementScore as number}</Badge>
-            {post.isReviewed && (
+            {post.isReviewed ? (
               <Badge variant={post.isRelevant ? 'default' : 'outline'}>
                 {post.isRelevant ? 'Relevant' : 'Not Relevant'}
               </Badge>
-            )}
+            ) : null}
           </div>
         </div>
       </CardHeader>
       <CardContent>
         <p className="text-sm whitespace-pre-wrap mb-4">
           {expanded ? content : truncate(content, 300)}
-          {shouldTruncate && (
+          {shouldTruncate ? (
             <Button
               variant="link"
               className="px-1 h-auto"
@@ -74,7 +74,7 @@ export function PostCard({ post, onMarkRelevant, onCreateLead }: PostCardProps) 
                 </>
               )}
             </Button>
-          )}
+          ) : null}
         </p>
 
         <div className="flex items-center gap-4 text-sm text-muted-foreground mb-4">
@@ -116,13 +116,13 @@ export function PostCard({ post, onMarkRelevant, onCreateLead }: PostCardProps) 
             <UserPlus className="h-4 w-4 mr-1" />
             Create Lead
           </Button>
-          {post.postUrl && (
+          {post.postUrl ? (
             <Button size="sm" variant="ghost" asChild className="ml-auto">
               <a href={post.postUrl as string} target="_blank" rel="noopener noreferrer">
                 View on LinkedIn
               </a>
             </Button>
-          )}
+          ) : null}
         </div>
       </CardContent>
     </Card>
