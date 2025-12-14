@@ -80,12 +80,12 @@ export function LeadDrawer({
                 <div className="flex-1">
                   <DialogTitle className="text-xl">{lead.name as string}</DialogTitle>
                   <p className="text-muted-foreground">{lead.headline as string}</p>
-                  {lead.company && (
+                  {lead.company ? (
                     <p className="text-sm text-muted-foreground">{lead.company as string}</p>
-                  )}
+                  ) : null}
                   <div className="flex items-center gap-2 mt-2">
                     <StatusBadge status={lead.status as string} />
-                    {lead.profileUrl && (
+                    {lead.profileUrl ? (
                       <Button size="sm" variant="outline" asChild>
                         <a
                           href={lead.profileUrl as string}
@@ -96,7 +96,7 @@ export function LeadDrawer({
                           LinkedIn
                         </a>
                       </Button>
-                    )}
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -152,14 +152,14 @@ export function LeadDrawer({
                   />
                 </div>
 
-                {lead.sourcePost && (
+                {lead.sourcePost ? (
                   <div>
                     <label className="text-sm font-medium">Source Post</label>
                     <p className="text-sm text-muted-foreground mt-1">
                       From post by {(lead.sourcePost as { authorName: string }).authorName}
                     </p>
                   </div>
-                )}
+                ) : null}
 
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
@@ -218,7 +218,7 @@ export function LeadDrawer({
                   </Button>
                 </div>
 
-                {(lead.outreachSequences as unknown[])?.length > 0 && (
+                {(lead.outreachSequences as unknown[])?.length > 0 ? (
                   <div>
                     <label className="text-sm font-medium">Outreach History</label>
                     <ScrollArea className="h-48 mt-2">
@@ -249,7 +249,7 @@ export function LeadDrawer({
                       </div>
                     </ScrollArea>
                   </div>
-                )}
+                ) : null}
               </TabsContent>
 
               <TabsContent value="activity">
